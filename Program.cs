@@ -43,37 +43,114 @@ try
 
     Console.WriteLine();
 
-    const string symbol = "AAPL";
+    var symbols = new[]
+    {
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "TSLA"
+    };
 
     Console.WriteLine(
-        $"Reading market data for {symbol}..."
+        $"Scanning {symbols.Length} stocks..."
     );
 
+    Console.WriteLine();
+
     var request =
-        new LatestMarketDataRequest(symbol)
+        new LatestMarketDataListRequest(symbols)
         {
             Feed = MarketDataFeed.Iex
         };
 
-    var snapshot =
-        await dataClient.GetSnapshotAsync(
+    var snapshots =
+        await dataClient.ListSnapshotsAsync(
             request
         );
 
-    var bar = snapshot.MinuteBar;
+    Console.WriteLine(
+        "=============================================="
+    );
 
-    Console.WriteLine();
-    Console.WriteLine($"Symbol: {symbol}");
-    Console.WriteLine($"Open:   ${bar.Open}");
-    Console.WriteLine($"High:   ${bar.High}");
-    Console.WriteLine($"Low:    ${bar.Low}");
-    Console.WriteLine($"Close:  ${bar.Close}");
-    Console.WriteLine($"Volume: {bar.Volume}");
-    Console.WriteLine($"Time:   {bar.TimeUtc:O}");
+    Console.WriteLine(
+        " MARKET SCANNER"
+    );
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    foreach (var symbol in symbols)
+    {
+        if (!snapshots.TryGetValue(
+                symbol,
+                out var snapshot))
+        {
+            Console.WriteLine(
+                $"{symbol}: No data available."
+            );
+
+            continue;
+        }
+
+        var bar = snapshot.MinuteBar;
+
+        if (bar is null)
+        {
+            Console.WriteLine(
+                $"{symbol}: No minute bar available."
+            );
+
+            continue;
+        }
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Symbol: {symbol}"
+        );
+
+        Console.WriteLine(
+            $"Open:   ${bar.Open}"
+        );
+
+        Console.WriteLine(
+            $"High:   ${bar.High}"
+        );
+
+        Console.WriteLine(
+            $"Low:    ${bar.Low}"
+        );
+
+        Console.WriteLine(
+            $"Close:  ${bar.Close}"
+        );
+
+        Console.WriteLine(
+            $"Volume: {bar.Volume}"
+        );
+
+        Console.WriteLine(
+            $"Time:   {bar.TimeUtc:O}"
+        );
+
+        Console.WriteLine(
+            "----------------------------------------------"
+        );
+    }
 }
 catch (Exception ex)
 {
     Console.WriteLine();
-    Console.WriteLine("Request failed:");
-    Console.WriteLine(ex.Message);
+
+    Console.WriteLine(
+        "Request failed:"
+    );
+
+    Console.WriteLine(
+        ex.Message
+    );
 }
