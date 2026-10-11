@@ -13,10 +13,11 @@ if (string.IsNullOrWhiteSpace(keyId) ||
     return;
 }
 
-var credentials = new SecretKey(
-    keyId,
-    secretKey
-);
+var credentials =
+    new SecretKey(
+        keyId,
+        secretKey
+    );
 
 var tradingClient =
     Environments.Paper.GetAlpacaTradingClient(
@@ -60,15 +61,17 @@ try
 
     Console.WriteLine();
 
-    var request =
-        new LatestMarketDataListRequest(symbols)
+    var snapshotRequest =
+        new LatestMarketDataListRequest(
+            symbols
+        )
         {
             Feed = MarketDataFeed.Iex
         };
 
     var snapshots =
         await dataClient.ListSnapshotsAsync(
-            request
+            snapshotRequest
         );
 
     Console.WriteLine(
@@ -114,18 +117,6 @@ try
         );
 
         Console.WriteLine(
-            $"Open:   ${bar.Open}"
-        );
-
-        Console.WriteLine(
-            $"High:   ${bar.High}"
-        );
-
-        Console.WriteLine(
-            $"Low:    ${bar.Low}"
-        );
-
-        Console.WriteLine(
             $"Close:  ${bar.Close}"
         );
 
@@ -134,11 +125,87 @@ try
         );
 
         Console.WriteLine(
-            $"Time:   {bar.TimeUtc:O}"
+            "----------------------------------------------"
+        );
+    }
+
+    Console.WriteLine();
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    Console.WriteLine(
+        " HISTORICAL DATA TEST"
+    );
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    const string analysisSymbol = "AAPL";
+
+    var endDate =
+        DateTime.UtcNow;
+
+    var startDate =
+        endDate.AddDays(-90);
+
+    var historicalRequest =
+        new HistoricalBarsRequest(
+            analysisSymbol,
+            startDate,
+            endDate,
+            BarTimeFrame.Day
+        )
+        {
+            Feed = MarketDataFeed.Iex
+        };
+
+    var historicalPage =
+        await dataClient.ListHistoricalBarsAsync(
+            historicalRequest
+        );
+
+    var bars =
+        historicalPage.Items
+            .OrderBy(bar => bar.TimeUtc)
+            .ToList();
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        $"Symbol: {analysisSymbol}"
+    );
+
+    Console.WriteLine(
+        $"Daily bars loaded: {bars.Count}"
+    );
+
+    if (bars.Count > 0)
+    {
+        var firstBar = bars.First();
+        var lastBar = bars.Last();
+
+        Console.WriteLine(
+            $"First date: {firstBar.TimeUtc:yyyy-MM-dd}"
         );
 
         Console.WriteLine(
-            "----------------------------------------------"
+            $"First close: ${firstBar.Close}"
+        );
+
+        Console.WriteLine(
+            $"Latest date: {lastBar.TimeUtc:yyyy-MM-dd}"
+        );
+
+        Console.WriteLine(
+            $"Latest close: ${lastBar.Close}"
+        );
+    }
+    else
+    {
+        Console.WriteLine(
+            "No historical bars returned."
         );
     }
 }
