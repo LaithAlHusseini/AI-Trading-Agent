@@ -1,10 +1,16 @@
 ﻿using Alpaca.Markets;
+using Microsoft.Extensions.Configuration;
+
+var configuration =
+    new ConfigurationBuilder()
+        .AddUserSecrets<Program>()
+        .Build();
 
 var keyId =
-    Environment.GetEnvironmentVariable("ALPACA_KEY_ID");
+    configuration["ALPACA_KEY_ID"];
 
 var secretKey =
-    Environment.GetEnvironmentVariable("ALPACA_SECRET_KEY");
+    configuration["ALPACA_SECRET_KEY"];
 
 if (string.IsNullOrWhiteSpace(keyId) ||
     string.IsNullOrWhiteSpace(secretKey))
