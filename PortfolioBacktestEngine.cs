@@ -37,7 +37,7 @@ public sealed class PortfolioBacktestEngine
         _dataClient = dataClient;
     }
 
-    public async Task RunAsync(
+    public async Task<PortfolioBacktestRunResult> RunAsync(
         IEnumerable<string> symbols)
     {
         var tradingSymbols =
@@ -227,6 +227,12 @@ public sealed class PortfolioBacktestEngine
 
         Console.WriteLine(
             "NO ORDERS WERE SUBMITTED."
+        );
+
+        return new PortfolioBacktestRunResult(
+            development,
+            outOfSample,
+             overall
         );
     }
 
@@ -2296,4 +2302,10 @@ public sealed record PortfolioSimulationResult(
     int RejectedForExistingPosition,
     int RejectedByRiskRules,
     int MaximumOpenPositionsObserved
+);
+
+public sealed record PortfolioBacktestRunResult(
+    PortfolioSimulationResult Development,
+    PortfolioSimulationResult OutOfSample,
+    PortfolioSimulationResult Overall
 );

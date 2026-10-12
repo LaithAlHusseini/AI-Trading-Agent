@@ -318,8 +318,18 @@ try
             dataClient
         );
 
-    await portfolioBacktestEngine.RunAsync(
-        symbols
+    var portfolioBacktestResult =
+        await portfolioBacktestEngine.RunAsync(
+         symbols
+        );
+
+    var diagnosticsEngine =
+        new DiagnosticsEngine();
+
+    diagnosticsEngine.Run(
+     portfolioBacktestResult.Development,
+     portfolioBacktestResult.OutOfSample,
+     portfolioBacktestResult.Overall
     );
 
     Console.WriteLine();
