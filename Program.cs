@@ -304,6 +304,15 @@ try
         );
     }
 
+    var backtestEngine =
+        new BacktestEngine(
+            dataClient
+    );
+
+    await backtestEngine.RunAsync(
+        symbols
+    );
+    
     Console.WriteLine();
 
     Console.WriteLine(
