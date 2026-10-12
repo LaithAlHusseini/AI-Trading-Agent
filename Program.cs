@@ -313,6 +313,15 @@ try
         symbols
     );
     
+    var portfolioBacktestEngine =
+        new PortfolioBacktestEngine(
+            dataClient
+        );
+
+    await portfolioBacktestEngine.RunAsync(
+        symbols
+    );
+
     Console.WriteLine();
 
     Console.WriteLine(
