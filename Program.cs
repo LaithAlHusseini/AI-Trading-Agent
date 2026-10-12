@@ -50,6 +50,16 @@ try
 
     Console.WriteLine();
 
+    const double strategyCapital = 20.00;
+
+    // Maximum amount we are willing to lose
+    // on one trade.
+    const double riskPerTradePercent = 0.50;
+
+    // Maximum percentage of total capital
+    // allowed in one position.
+    const double maxPositionPercent = 25.00;
+
     var symbols = new[]
     {
         "AAPL",
@@ -69,11 +79,23 @@ try
     );
 
     Console.WriteLine(
-        " MULTI-STOCK ANALYSIS ENGINE"
+        " AI TRADING ANALYSIS ENGINE"
     );
 
     Console.WriteLine(
         "=============================================="
+    );
+
+    Console.WriteLine(
+        $"Strategy Capital: ${strategyCapital:F2}"
+    );
+
+    Console.WriteLine(
+        $"Risk Per Trade: {riskPerTradePercent:F2}%"
+    );
+
+    Console.WriteLine(
+        $"Max Position: {maxPositionPercent:F2}%"
     );
 
     Console.WriteLine();
@@ -98,19 +120,6 @@ try
         }
     }
 
-    Console.WriteLine();
-    Console.WriteLine(
-        "=============================================="
-    );
-
-    Console.WriteLine(
-        " RANKING"
-    );
-
-    Console.WriteLine(
-        "=============================================="
-    );
-
     var ranked =
         analyses
             .OrderByDescending(
@@ -123,6 +132,20 @@ try
                 item => item.RiskScore
             )
             .ToList();
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    Console.WriteLine(
+        " ANALYSIS RANKING"
+    );
+
+    Console.WriteLine(
+        "=============================================="
+    );
 
     for (
         var index = 0;
@@ -160,19 +183,11 @@ try
         );
 
         Console.WriteLine(
-            $"Volume Ratio: {item.VolumeRatio:F2}x"
+            $"Opportunity: {item.OpportunityScore}/100"
         );
 
         Console.WriteLine(
-            $"Drawdown: {item.Drawdown:F2}%"
-        );
-
-        Console.WriteLine(
-            $"Opportunity Score: {item.OpportunityScore}/100"
-        );
-
-        Console.WriteLine(
-            $"Risk Score: {item.RiskScore}/100"
+            $"Risk: {item.RiskScore}/100"
         );
 
         Console.WriteLine(
@@ -187,6 +202,117 @@ try
             "----------------------------------------------"
         );
     }
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    Console.WriteLine(
+        " TRADE CANDIDATE ENGINE"
+    );
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    foreach (
+        var analysis in ranked
+    )
+    {
+        var candidate =
+            BuildTradeCandidate(
+                analysis,
+                strategyCapital,
+                riskPerTradePercent,
+                maxPositionPercent
+            );
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"[{candidate.Symbol}]"
+        );
+
+        Console.WriteLine(
+            $"Analysis Decision: {analysis.Decision}"
+        );
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Entry:        ${candidate.EntryPrice:F2}"
+        );
+
+        Console.WriteLine(
+            $"ATR(14):      ${candidate.Atr:F2}"
+        );
+
+        Console.WriteLine(
+            $"Stop Loss:    ${candidate.StopLoss:F2}"
+        );
+
+        Console.WriteLine(
+            $"Take Profit:  ${candidate.TakeProfit:F2}"
+        );
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Risk/Share:   ${candidate.RiskPerShare:F2}"
+        );
+
+        Console.WriteLine(
+            $"Reward/Share: ${candidate.RewardPerShare:F2}"
+        );
+
+        Console.WriteLine(
+            $"Risk/Reward:  1:{candidate.RiskRewardRatio:F2}"
+        );
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"Max Risk:     ${candidate.MaximumRiskDollars:F2}"
+        );
+
+        Console.WriteLine(
+            $"Position:     {candidate.Quantity:F4} shares"
+        );
+
+        Console.WriteLine(
+            $"Position $:   ${candidate.PositionValue:F2}"
+        );
+
+        Console.WriteLine(
+            $"Max Loss:     ${candidate.ExpectedMaximumLoss:F2}"
+        );
+
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"FINAL: {candidate.FinalDecision}"
+        );
+
+        Console.WriteLine(
+            $"Reason: {candidate.Reason}"
+        );
+
+        Console.WriteLine(
+            "----------------------------------------------"
+        );
+    }
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "NO ORDERS WERE SUBMITTED."
+    );
+
+    Console.WriteLine(
+        "This run only analyzed and simulated trade candidates."
+    );
 }
 catch (Exception ex)
 {
@@ -318,6 +444,28 @@ static async Task<StockAnalysis?> AnalyzeStockAsync(
                     highestClose20
                   ) * 100
                 : 0;
+
+        var atr =
+            CalculateAtr(
+                bars,
+                14
+            );
+
+        var support10 =
+            bars
+                .TakeLast(10)
+                .Min(
+                    bar =>
+                        (double)bar.Low
+                );
+
+        var resistance20 =
+            bars
+                .TakeLast(20)
+                .Max(
+                    bar =>
+                        (double)bar.High
+                );
 
         var trend =
             currentPrice > sma20 &&
@@ -453,6 +601,9 @@ static async Task<StockAnalysis?> AnalyzeStockAsync(
             volumeStrength,
             volumeRatio,
             drawdown,
+            atr,
+            support10,
+            resistance20,
             opportunityScore,
             riskScore,
             netScore,
@@ -467,6 +618,216 @@ static async Task<StockAnalysis?> AnalyzeStockAsync(
 
         return null;
     }
+}
+
+static TradeCandidate BuildTradeCandidate(
+    StockAnalysis analysis,
+    double strategyCapital,
+    double riskPerTradePercent,
+    double maxPositionPercent
+)
+{
+    var entry =
+        analysis.Price;
+
+    var atr =
+        analysis.Atr;
+
+    if (atr <= 0)
+    {
+        return RejectedCandidate(
+            analysis,
+            "ATR is unavailable or invalid."
+        );
+    }
+
+    // Volatility-based protective stop.
+    var atrStop =
+        entry -
+        (atr * 2.0);
+
+    // Technical support-based stop.
+    var supportStop =
+        analysis.Support10 -
+        (atr * 0.25);
+
+    // Use the tighter valid stop.
+    var stopLoss =
+        Math.Max(
+            atrStop,
+            supportStop
+        );
+
+    if (stopLoss <= 0 ||
+        stopLoss >= entry)
+    {
+        return RejectedCandidate(
+            analysis,
+            "No valid stop-loss level could be calculated."
+        );
+    }
+
+    // Target above recent resistance.
+    var takeProfit =
+        analysis.Resistance20 +
+        (atr * 1.50);
+
+    if (takeProfit <= entry)
+    {
+        return RejectedCandidate(
+            analysis,
+            "Calculated target is not above the entry price."
+        );
+    }
+
+    var riskPerShare =
+        entry -
+        stopLoss;
+
+    var rewardPerShare =
+        takeProfit -
+        entry;
+
+    var riskRewardRatio =
+        rewardPerShare /
+        riskPerShare;
+
+    var maximumRiskDollars =
+        strategyCapital *
+        (
+            riskPerTradePercent /
+            100.0
+        );
+
+    var maximumPositionDollars =
+        strategyCapital *
+        (
+            maxPositionPercent /
+            100.0
+        );
+
+    var quantityByRisk =
+        maximumRiskDollars /
+        riskPerShare;
+
+    var quantityByCapital =
+        maximumPositionDollars /
+        entry;
+
+    var quantity =
+        Math.Min(
+            quantityByRisk,
+            quantityByCapital
+        );
+
+    quantity =
+        Math.Floor(
+            quantity * 10000
+        ) /
+        10000;
+
+    var positionValue =
+        quantity *
+        entry;
+
+    var expectedMaximumLoss =
+        quantity *
+        riskPerShare;
+
+    var finalDecision =
+        "PAPER TRADE CANDIDATE";
+
+    var reason =
+        "Passed analysis and risk-management rules.";
+
+    if (analysis.Decision != "CONSIDER")
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            "Analysis engine did not classify the stock as CONSIDER.";
+    }
+    else if (analysis.Trend != "Bullish")
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            "Long candidate requires a bullish trend.";
+    }
+    else if (analysis.Momentum <= 0)
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            "Momentum is not positive.";
+    }
+    else if (analysis.RiskScore > 35)
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            "Risk score exceeds the maximum allowed threshold.";
+    }
+    else if (riskRewardRatio < 1.80)
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            $"Risk/reward ratio {riskRewardRatio:F2} is below 1.80.";
+    }
+    else if (quantity < 0.001)
+    {
+        finalDecision =
+            "REJECTED";
+
+        reason =
+            "Position size is too small for this strategy capital.";
+    }
+
+    return new TradeCandidate(
+        analysis.Symbol,
+        entry,
+        atr,
+        stopLoss,
+        takeProfit,
+        riskPerShare,
+        rewardPerShare,
+        riskRewardRatio,
+        maximumRiskDollars,
+        quantity,
+        positionValue,
+        expectedMaximumLoss,
+        finalDecision,
+        reason
+    );
+}
+
+static TradeCandidate RejectedCandidate(
+    StockAnalysis analysis,
+    string reason
+)
+{
+    return new TradeCandidate(
+        analysis.Symbol,
+        analysis.Price,
+        analysis.Atr,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "REJECTED",
+        reason
+    );
 }
 
 static double AverageLast(
@@ -577,6 +938,69 @@ static double CalculateAnnualizedVolatility(
         100;
 }
 
+static double CalculateAtr(
+    IReadOnlyList<IBar> bars,
+    int periods
+)
+{
+    if (bars.Count <= periods)
+    {
+        return 0;
+    }
+
+    var trueRanges =
+        new List<double>();
+
+    for (
+        var index = 1;
+        index < bars.Count;
+        index++
+    )
+    {
+        var currentHigh =
+            (double)bars[index].High;
+
+        var currentLow =
+            (double)bars[index].Low;
+
+        var previousClose =
+            (double)bars[index - 1].Close;
+
+        var highLow =
+            currentHigh -
+            currentLow;
+
+        var highPreviousClose =
+            Math.Abs(
+                currentHigh -
+                previousClose
+            );
+
+        var lowPreviousClose =
+            Math.Abs(
+                currentLow -
+                previousClose
+            );
+
+        var trueRange =
+            Math.Max(
+                highLow,
+                Math.Max(
+                    highPreviousClose,
+                    lowPreviousClose
+                )
+            );
+
+        trueRanges.Add(
+            trueRange
+        );
+    }
+
+    return trueRanges
+        .TakeLast(periods)
+        .Average();
+}
+
 record StockAnalysis(
     string Symbol,
     double Price,
@@ -588,8 +1012,28 @@ record StockAnalysis(
     string VolumeStrength,
     double VolumeRatio,
     double Drawdown,
+    double Atr,
+    double Support10,
+    double Resistance20,
     int OpportunityScore,
     int RiskScore,
     int NetScore,
     string Decision
+);
+
+record TradeCandidate(
+    string Symbol,
+    double EntryPrice,
+    double Atr,
+    double StopLoss,
+    double TakeProfit,
+    double RiskPerShare,
+    double RewardPerShare,
+    double RiskRewardRatio,
+    double MaximumRiskDollars,
+    double Quantity,
+    double PositionValue,
+    double ExpectedMaximumLoss,
+    string FinalDecision,
+    string Reason
 );
