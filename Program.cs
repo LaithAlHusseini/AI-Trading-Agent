@@ -368,6 +368,13 @@ try
         symbols
     );
 
+    var paperTradingEngine =
+        new PaperTradingEngine(
+            tradingClient
+        );
+
+    await paperTradingEngine.RunPreflightAsync();
+
     Console.WriteLine();
 
     Console.WriteLine(
