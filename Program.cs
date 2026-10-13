@@ -332,6 +332,42 @@ try
      portfolioBacktestResult.Overall
     );
 
+    var strategyExperimentEngine =
+        new StrategyExperimentEngine(
+         portfolioBacktestEngine
+     );
+
+    await strategyExperimentEngine.RunAsync(
+    symbols
+    );
+
+    var walkForwardValidationEngine =
+        new WalkForwardValidationEngine(
+            portfolioBacktestEngine
+        );
+
+    await walkForwardValidationEngine.RunAsync(
+        symbols
+    );
+
+    var marketRegimeValidationEngine =
+        new MarketRegimeValidationEngine(
+            portfolioBacktestEngine
+        );
+
+    await marketRegimeValidationEngine.RunAsync(    
+        symbols
+    );
+
+    var regimeAwareWalkForwardEngine =
+        new RegimeAwareWalkForwardEngine(
+         portfolioBacktestEngine
+        );
+
+    await regimeAwareWalkForwardEngine.RunAsync(
+        symbols
+    );
+
     Console.WriteLine();
 
     Console.WriteLine(

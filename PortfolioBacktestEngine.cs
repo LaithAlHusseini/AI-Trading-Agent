@@ -1,6 +1,6 @@
 using Alpaca.Markets;
 
-public sealed class PortfolioBacktestEngine
+public sealed partial class PortfolioBacktestEngine
 {
     private readonly IAlpacaDataClient _dataClient;
 
@@ -35,6 +35,82 @@ public sealed class PortfolioBacktestEngine
         IAlpacaDataClient dataClient)
     {
         _dataClient = dataClient;
+    }
+
+    public async Task<IReadOnlyList<StrategyExperimentResult>>
+        RunDevelopmentExperimentsAsync(
+            IEnumerable<string> symbols,
+            IReadOnlyCollection<StrategyExperimentConfig> configurations)
+    {
+        var tradingSymbols =
+            symbols
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase
+                )
+                .ToArray();
+
+        if (tradingSymbols.Length == 0)
+        {
+            return Array.Empty<StrategyExperimentResult>();
+        }
+
+        if (configurations.Count == 0)
+        {
+            return Array.Empty<StrategyExperimentResult>();
+        }
+
+        var history =
+            new Dictionary<string, List<IBar>>(
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        foreach (var symbol in tradingSymbols)
+        {
+            var bars =
+                await LoadHistoricalBarsAsync(
+                    symbol
+                );
+
+            history[symbol] =
+                bars;
+        }
+
+        var endDate =
+            DateTime.UtcNow.Date;
+
+        var developmentStart =
+            endDate.AddYears(
+                -BacktestYears
+            );
+
+        var developmentEnd =
+            OutOfSampleStart
+                .AddDays(-1);
+
+        var results =
+            new List<StrategyExperimentResult>();
+
+        foreach (var configuration in configurations)
+        {
+            var simulation =
+                SimulatePortfolio(
+                    $"V5 DEVELOPMENT - {configuration.Name}",
+                    tradingSymbols,
+                    history,
+                    developmentStart,
+                    developmentEnd,
+                    configuration
+                );
+
+            results.Add(
+                BuildStrategyExperimentResult(
+                    configuration,
+                    simulation
+                )
+            );
+        }
+
+        return results;
     }
 
     public async Task<PortfolioBacktestRunResult> RunAsync(
@@ -153,7 +229,8 @@ public sealed class PortfolioBacktestEngine
                 tradingSymbols,
                 history,
                 overallStart,
-                developmentEnd
+                developmentEnd,
+                StrategyExperimentConfig.Baseline
             );
 
         var outOfSample =
@@ -162,7 +239,8 @@ public sealed class PortfolioBacktestEngine
                 tradingSymbols,
                 history,
                 OutOfSampleStart,
-                endDate
+                endDate,
+                StrategyExperimentConfig.Baseline
             );
 
         var overall =
@@ -171,7 +249,8 @@ public sealed class PortfolioBacktestEngine
                 tradingSymbols,
                 history,
                 overallStart,
-                endDate
+                endDate,
+                StrategyExperimentConfig.Baseline
             );
 
         PrintResult(
@@ -313,7 +392,9 @@ public sealed class PortfolioBacktestEngine
             IReadOnlyCollection<string> symbols,
             IReadOnlyDictionary<string, List<IBar>> history,
             DateTime startDate,
-            DateTime endDate)
+            DateTime endDate,
+            StrategyExperimentConfig configuration,
+            Func<PortfolioSignal, bool>? signalFilter = null)
     {
         var barMaps =
             new Dictionary<
@@ -359,8 +440,22 @@ public sealed class PortfolioBacktestEngine
                 symbols,
                 history,
                 startDate,
-                endDate
+                endDate,
+                configuration
             );
+
+        if (signalFilter is not null)
+        {
+            signals =
+                signals
+                    .Where(
+                        signal =>
+                            signalFilter(
+                                signal
+                            )
+                    )
+                    .ToList();
+        }
 
         var signalsByDate =
             signals
@@ -466,6 +561,11 @@ public sealed class PortfolioBacktestEngine
 
                 if (exit is not null)
                 {
+                    UpdateExcursionsForExit(
+                        position,
+                        exit
+                    );
+
                     ClosePosition(
                         position,
                         exit.RawExitPrice,
@@ -483,6 +583,11 @@ public sealed class PortfolioBacktestEngine
                     position.HoldingDays >=
                     MaxHoldingDays)
                 {
+                    UpdateExcursions(
+                        position,
+                        bar
+                    );
+
                     ClosePosition(
                         position,
                         (double)bar.Close,
@@ -498,6 +603,11 @@ public sealed class PortfolioBacktestEngine
                 }
                 else
                 {
+                    UpdateExcursions(
+                        position,
+                        bar
+                    );
+
                     position.LastMarkPrice =
                         (double)bar.Close;
                 }
@@ -551,7 +661,8 @@ public sealed class PortfolioBacktestEngine
                     var candidate =
                         BuildCandidate(
                             signal.Analysis,
-                            executionPrice
+                            executionPrice,
+                            configuration
                         );
 
                     if (!candidate.IsValid)
@@ -662,6 +773,61 @@ public sealed class PortfolioBacktestEngine
                         ) *
                         quantity;
 
+                    var atrPercent =
+                        executionPrice > 0
+                            ? signal.Analysis.Atr /
+                              executionPrice *
+                              100.0
+                            : 0;
+
+                    var distanceFromSma20Percent =
+                        signal.Analysis.Sma20 > 0
+                            ? (
+                                signal.Analysis.Price -
+                                signal.Analysis.Sma20
+                              ) /
+                              signal.Analysis.Sma20 *
+                              100.0
+                            : 0;
+
+                    var distanceFromSma50Percent =
+                        signal.Analysis.Sma50 > 0
+                            ? (
+                                signal.Analysis.Price -
+                                signal.Analysis.Sma50
+                              ) /
+                              signal.Analysis.Sma50 *
+                              100.0
+                            : 0;
+
+                    var entryGapPercent =
+                        signal.Analysis.Price > 0
+                            ? (
+                                rawOpen -
+                                signal.Analysis.Price
+                              ) /
+                              signal.Analysis.Price *
+                              100.0
+                            : 0;
+
+                    var stopDistanceAtr =
+                        signal.Analysis.Atr > 0
+                            ? (
+                                executionPrice -
+                                candidate.StopLoss
+                              ) /
+                              signal.Analysis.Atr
+                            : 0;
+
+                    var targetDistanceAtr =
+                        signal.Analysis.Atr > 0
+                            ? (
+                                candidate.TakeProfit -
+                                executionPrice
+                              ) /
+                              signal.Analysis.Atr
+                            : 0;
+
                     var position =
                         new PortfolioPosition(
                             signal.Symbol,
@@ -670,12 +836,25 @@ public sealed class PortfolioBacktestEngine
                             quantity,
                             candidate.StopLoss,
                             candidate.TakeProfit,
+                            candidate.RiskPerShare,
                             initialRiskDollars,
                             entryValue,
                             entryFee,
                             entrySlippageCost,
                             1,
-                            (double)entryBar.Close
+                            (double)entryBar.Close,
+                            signal.Analysis.OpportunityScore,
+                            signal.Analysis.RiskScore,
+                            signal.NetScore,
+                            signal.Analysis.Momentum,
+                            signal.Analysis.Volatility,
+                            atrPercent,
+                            distanceFromSma20Percent,
+                            distanceFromSma50Percent,
+                            entryGapPercent,
+                            stopDistanceAtr,
+                            targetDistanceAtr,
+                            candidate.RiskRewardRatio
                         );
 
                     openPositions[
@@ -689,9 +868,9 @@ public sealed class PortfolioBacktestEngine
                             openPositions.Count
                         );
 
-                    // Position was entered at today's open,
-                    // so we can evaluate today's high/low,
-                    // but not a gap before entry.
+                    // Position was entered at today's open.
+                    // With daily bars we do not know the intraday path,
+                    // so excursion tracking is conservative on exit bars.
                     var sameDayExit =
                         EvaluateExit(
                             position,
@@ -701,6 +880,11 @@ public sealed class PortfolioBacktestEngine
 
                     if (sameDayExit is not null)
                     {
+                        UpdateExcursionsForExit(
+                            position,
+                            sameDayExit
+                        );
+
                         ClosePosition(
                             position,
                             sameDayExit.RawExitPrice,
@@ -712,6 +896,13 @@ public sealed class PortfolioBacktestEngine
 
                         openPositions.Remove(
                             signal.Symbol
+                        );
+                    }
+                    else
+                    {
+                        UpdateExcursions(
+                            position,
+                            entryBar
                         );
                     }
                 }
@@ -816,6 +1007,13 @@ public sealed class PortfolioBacktestEngine
             );
         }
 
+        trades =
+            AddPostExitRecoveryDiagnostics(
+                trades,
+                history,
+                endDate
+            );
+
         return new PortfolioSimulationResult(
             name,
             startDate,
@@ -837,7 +1035,8 @@ public sealed class PortfolioBacktestEngine
             IEnumerable<string> symbols,
             IReadOnlyDictionary<string, List<IBar>> history,
             DateTime startDate,
-            DateTime endDate)
+            DateTime endDate,
+            StrategyExperimentConfig configuration)
     {
         var signals =
             new List<PortfolioSignal>();
@@ -891,9 +1090,19 @@ public sealed class PortfolioBacktestEngine
                         index
                     );
 
-                if (analysis is null ||
-                    analysis.Decision !=
-                    "CONSIDER")
+                if (analysis is null)
+                {
+                    continue;
+                }
+
+                if (analysis.OpportunityScore <
+                    configuration.MinOpportunityScore)
+                {
+                    continue;
+                }
+
+                if (analysis.RiskScore >
+                    configuration.MaxRiskScore)
                 {
                     continue;
                 }
@@ -903,6 +1112,28 @@ public sealed class PortfolioBacktestEngine
                         bars[index + 1]
                             .Open;
 
+                var entryGapPercent =
+                    analysis.Price > 0
+                        ? (
+                            rawEntryOpen -
+                            analysis.Price
+                          ) /
+                          analysis.Price *
+                          100.0
+                        : 0;
+
+                if (configuration.MinEntryGapPercent is double minGap &&
+                    entryGapPercent < minGap)
+                {
+                    continue;
+                }
+
+                if (configuration.MaxEntryGapPercent is double maxGap &&
+                    entryGapPercent > maxGap)
+                {
+                    continue;
+                }
+
                 var previewEntry =
                     ApplyBuySlippage(
                         rawEntryOpen
@@ -911,10 +1142,32 @@ public sealed class PortfolioBacktestEngine
                 var candidate =
                     BuildCandidate(
                         analysis,
-                        previewEntry
+                        previewEntry,
+                        configuration
                     );
 
                 if (!candidate.IsValid)
+                {
+                    continue;
+                }
+
+                var stopDistanceAtr =
+                    analysis.Atr > 0
+                        ? (
+                            previewEntry -
+                            candidate.StopLoss
+                          ) /
+                          analysis.Atr
+                        : 0;
+
+                if (configuration.MinStopDistanceAtr is double minStopAtr &&
+                    stopDistanceAtr < minStopAtr)
+                {
+                    continue;
+                }
+
+                if (configuration.MaxStopDistanceAtr is double maxStopAtr &&
+                    stopDistanceAtr > maxStopAtr)
                 {
                     continue;
                 }
@@ -1182,6 +1435,8 @@ public sealed class PortfolioBacktestEngine
             symbol,
             bars[index].TimeUtc,
             price,
+            sma20,
+            sma50,
             trend,
             momentum,
             volatility,
@@ -1199,7 +1454,8 @@ public sealed class PortfolioBacktestEngine
     private static PortfolioCandidate
         BuildCandidate(
             PortfolioAnalysis analysis,
-            double entryPrice)
+            double entryPrice,
+            StrategyExperimentConfig configuration)
     {
         if (analysis.Atr <= 0)
         {
@@ -1283,19 +1539,30 @@ public sealed class PortfolioBacktestEngine
                 );
         }
 
-        if (analysis.RiskScore > 35)
+        if (analysis.RiskScore >
+            configuration.MaxRiskScore)
         {
             return
                 PortfolioCandidate.Invalid(
-                    "Risk score too high."
+                    $"Risk score above {configuration.MaxRiskScore}."
                 );
         }
 
-        if (riskReward < 1.80)
+        if (riskReward <
+            configuration.MinRiskReward)
         {
             return
                 PortfolioCandidate.Invalid(
-                    "Risk/reward below 1.80."
+                    $"Risk/reward below {configuration.MinRiskReward:F2}."
+                );
+        }
+
+        if (configuration.MaxRiskReward is double maxRiskReward &&
+            riskReward > maxRiskReward)
+        {
+            return
+                PortfolioCandidate.Invalid(
+                    $"Risk/reward above {maxRiskReward:F2}."
                 );
         }
 
@@ -1382,6 +1649,67 @@ public sealed class PortfolioBacktestEngine
         return null;
     }
 
+    private static void UpdateExcursions(
+        PortfolioPosition position,
+        IBar bar)
+    {
+        position.LowestObservedPrice =
+            Math.Min(
+                position.LowestObservedPrice,
+                (double)bar.Low
+            );
+
+        position.HighestObservedPrice =
+            Math.Max(
+                position.HighestObservedPrice,
+                (double)bar.High
+            );
+    }
+
+    private static void UpdateExcursionsForExit(
+        PortfolioPosition position,
+        PortfolioExitDecision exit)
+    {
+        // Daily bars do not reveal the intraday sequence.
+        // On an exit bar we only count the price level that
+        // must have been reached before the simulated exit.
+        switch (exit.Reason)
+        {
+            case "GAP_STOP":
+                position.LowestObservedPrice =
+                    Math.Min(
+                        position.LowestObservedPrice,
+                        exit.RawExitPrice
+                    );
+                break;
+
+            case "STOP_LOSS":
+            case "BOTH_HIT_ASSUME_STOP":
+                position.LowestObservedPrice =
+                    Math.Min(
+                        position.LowestObservedPrice,
+                        position.StopLoss
+                    );
+                break;
+
+            case "GAP_TARGET":
+                position.HighestObservedPrice =
+                    Math.Max(
+                        position.HighestObservedPrice,
+                        exit.RawExitPrice
+                    );
+                break;
+
+            case "TAKE_PROFIT":
+                position.HighestObservedPrice =
+                    Math.Max(
+                        position.HighestObservedPrice,
+                        position.TakeProfit
+                    );
+                break;
+        }
+    }
+
     private static void ClosePosition(
         PortfolioPosition position,
         double rawExitPrice,
@@ -1446,6 +1774,46 @@ public sealed class PortfolioBacktestEngine
             ) *
             position.Quantity;
 
+        var maePerShare =
+            Math.Max(
+                0,
+                position.EntryPrice -
+                position.LowestObservedPrice
+            );
+
+        var mfePerShare =
+            Math.Max(
+                0,
+                position.HighestObservedPrice -
+                position.EntryPrice
+            );
+
+        var maeR =
+            position.InitialRiskPerShare > 0
+                ? maePerShare /
+                  position.InitialRiskPerShare
+                : 0;
+
+        var mfeR =
+            position.InitialRiskPerShare > 0
+                ? mfePerShare /
+                  position.InitialRiskPerShare
+                : 0;
+
+        var maePercent =
+            position.EntryPrice > 0
+                ? maePerShare /
+                  position.EntryPrice *
+                  100.0
+                : 0;
+
+        var mfePercent =
+            position.EntryPrice > 0
+                ? mfePerShare /
+                  position.EntryPrice *
+                  100.0
+                : 0;
+
         trades.Add(
             new PortfolioTrade(
                 position.Symbol,
@@ -1462,9 +1830,162 @@ public sealed class PortfolioBacktestEngine
                 pnl,
                 returnPercent,
                 rMultiple,
-                exitReason
+                exitReason,
+                position.InitialRiskPerShare,
+                position.OpportunityScore,
+                position.RiskScore,
+                position.NetScore,
+                position.Momentum,
+                position.Volatility,
+                position.AtrPercent,
+                position.DistanceFromSma20Percent,
+                position.DistanceFromSma50Percent,
+                position.EntryGapPercent,
+                position.StopDistanceAtr,
+                position.TargetDistanceAtr,
+                position.RiskRewardRatio,
+                maeR,
+                mfeR,
+                maePercent,
+                mfePercent
             )
         );
+    }
+
+    private static List<PortfolioTrade>
+        AddPostExitRecoveryDiagnostics(
+            IEnumerable<PortfolioTrade> trades,
+            IReadOnlyDictionary<string, List<IBar>> history,
+            DateTime simulationEndDate)
+    {
+        var enriched =
+            new List<PortfolioTrade>();
+
+        foreach (var trade in trades)
+        {
+            if (!IsStopRelatedExit(
+                    trade.ExitReason) ||
+                !history.TryGetValue(
+                    trade.Symbol,
+                    out var bars) ||
+                trade.InitialRiskPerShare <= 0)
+            {
+                enriched.Add(
+                    trade
+                );
+
+                continue;
+            }
+
+            var futureBars =
+                bars
+                    .Where(
+                        bar =>
+                            bar.TimeUtc.Date >
+                            trade.ExitDate.Date &&
+                            bar.TimeUtc.Date <=
+                            simulationEndDate.Date
+                    )
+                    .OrderBy(
+                        bar =>
+                            bar.TimeUtc
+                    )
+                    .Take(10)
+                    .ToList();
+
+            if (futureBars.Count == 0)
+            {
+                enriched.Add(
+                    trade
+                );
+
+                continue;
+            }
+
+            var firstFive =
+                futureBars
+                    .Take(5)
+                    .ToList();
+
+            var bestR5 =
+                CalculatePostExitBestR(
+                    trade,
+                    firstFive
+                );
+
+            var bestR10 =
+                CalculatePostExitBestR(
+                    trade,
+                    futureBars
+                );
+
+            var recoveredEntry5 =
+                firstFive.Any(
+                    bar =>
+                        (double)bar.High >=
+                        trade.EntryPrice
+                );
+
+            var recoveredEntry10 =
+                futureBars.Any(
+                    bar =>
+                        (double)bar.High >=
+                        trade.EntryPrice
+                );
+
+            enriched.Add(
+                trade with
+                {
+                    PostExitBestR5 =
+                        bestR5,
+
+                    PostExitBestR10 =
+                        bestR10,
+
+                    RecoveredEntryWithin5Bars =
+                        recoveredEntry5,
+
+                    RecoveredEntryWithin10Bars =
+                        recoveredEntry10
+                }
+            );
+        }
+
+        return enriched;
+    }
+
+    private static double? CalculatePostExitBestR(
+        PortfolioTrade trade,
+        IReadOnlyCollection<IBar> bars)
+    {
+        if (bars.Count == 0 ||
+            trade.InitialRiskPerShare <= 0)
+        {
+            return null;
+        }
+
+        var maximumHigh =
+            bars.Max(
+                bar =>
+                    (double)bar.High
+            );
+
+        return
+            (
+                maximumHigh -
+                trade.EntryPrice
+            ) /
+            trade.InitialRiskPerShare;
+    }
+
+    private static bool IsStopRelatedExit(
+        string exitReason)
+    {
+        return
+            exitReason.Contains(
+                "STOP",
+                StringComparison.OrdinalIgnoreCase
+            );
     }
 
     private static double CalculatePortfolioValue(
@@ -1507,6 +2028,104 @@ public sealed class PortfolioBacktestEngine
         }
 
         return equity;
+    }
+
+    private static StrategyExperimentResult
+        BuildStrategyExperimentResult(
+            StrategyExperimentConfig configuration,
+            PortfolioSimulationResult simulation)
+    {
+        var trades =
+            simulation.Trades;
+
+        var wins =
+            trades.Count(
+                trade =>
+                    trade.Pnl > 0
+            );
+
+        var losses =
+            trades.Count(
+                trade =>
+                    trade.Pnl < 0
+            );
+
+        var grossProfit =
+            trades
+                .Where(
+                    trade =>
+                        trade.Pnl > 0
+                )
+                .Sum(
+                    trade =>
+                        trade.Pnl
+                );
+
+        var grossLoss =
+            Math.Abs(
+                trades
+                    .Where(
+                        trade =>
+                            trade.Pnl < 0
+                    )
+                    .Sum(
+                        trade =>
+                            trade.Pnl
+                    )
+            );
+
+        var winRate =
+            trades.Count > 0
+                ? wins /
+                  (double)trades.Count *
+                  100.0
+                : 0;
+
+        var profitFactor =
+            grossLoss > 0
+                ? grossProfit /
+                  grossLoss
+                : grossProfit > 0
+                    ? double.PositiveInfinity
+                    : 0;
+
+        var averageR =
+            trades.Count > 0
+                ? trades.Average(
+                    trade =>
+                        trade.RMultiple
+                  )
+                : 0;
+
+        var netPnl =
+            simulation.FinalEquity -
+            simulation.StartingCapital;
+
+        var returnPercent =
+            simulation.StartingCapital > 0
+                ? netPnl /
+                  simulation.StartingCapital *
+                  100.0
+                : 0;
+
+        var drawdown =
+            CalculateDrawdown(
+                simulation.EquityCurve
+            );
+
+        return new StrategyExperimentResult(
+            configuration,
+            simulation,
+            trades.Count,
+            wins,
+            losses,
+            winRate,
+            profitFactor,
+            averageR,
+            netPnl,
+            returnPercent,
+            drawdown.Percent
+        );
     }
 
     private static void PrintResult(
@@ -2158,6 +2777,8 @@ public sealed record PortfolioAnalysis(
     string Symbol,
     DateTime SignalDate,
     double Price,
+    double Sma20,
+    double Sma50,
     string Trend,
     double Momentum,
     double Volatility,
@@ -2214,12 +2835,25 @@ public sealed class PortfolioPosition
         double quantity,
         double stopLoss,
         double takeProfit,
+        double initialRiskPerShare,
         double initialRiskDollars,
         double entryValue,
         double entryFee,
         double entrySlippageCost,
         int holdingDays,
-        double lastMarkPrice)
+        double lastMarkPrice,
+        int opportunityScore,
+        int riskScore,
+        int netScore,
+        double momentum,
+        double volatility,
+        double atrPercent,
+        double distanceFromSma20Percent,
+        double distanceFromSma50Percent,
+        double entryGapPercent,
+        double stopDistanceAtr,
+        double targetDistanceAtr,
+        double riskRewardRatio)
     {
         Symbol = symbol;
         EntryDate = entryDate;
@@ -2227,12 +2861,27 @@ public sealed class PortfolioPosition
         Quantity = quantity;
         StopLoss = stopLoss;
         TakeProfit = takeProfit;
+        InitialRiskPerShare = initialRiskPerShare;
         InitialRiskDollars = initialRiskDollars;
         EntryValue = entryValue;
         EntryFee = entryFee;
         EntrySlippageCost = entrySlippageCost;
         HoldingDays = holdingDays;
         LastMarkPrice = lastMarkPrice;
+        OpportunityScore = opportunityScore;
+        RiskScore = riskScore;
+        NetScore = netScore;
+        Momentum = momentum;
+        Volatility = volatility;
+        AtrPercent = atrPercent;
+        DistanceFromSma20Percent = distanceFromSma20Percent;
+        DistanceFromSma50Percent = distanceFromSma50Percent;
+        EntryGapPercent = entryGapPercent;
+        StopDistanceAtr = stopDistanceAtr;
+        TargetDistanceAtr = targetDistanceAtr;
+        RiskRewardRatio = riskRewardRatio;
+        LowestObservedPrice = entryPrice;
+        HighestObservedPrice = entryPrice;
     }
 
     public string Symbol { get; }
@@ -2247,6 +2896,8 @@ public sealed class PortfolioPosition
 
     public double TakeProfit { get; }
 
+    public double InitialRiskPerShare { get; }
+
     public double InitialRiskDollars { get; }
 
     public double EntryValue { get; }
@@ -2255,9 +2906,37 @@ public sealed class PortfolioPosition
 
     public double EntrySlippageCost { get; }
 
+    public int OpportunityScore { get; }
+
+    public int RiskScore { get; }
+
+    public int NetScore { get; }
+
+    public double Momentum { get; }
+
+    public double Volatility { get; }
+
+    public double AtrPercent { get; }
+
+    public double DistanceFromSma20Percent { get; }
+
+    public double DistanceFromSma50Percent { get; }
+
+    public double EntryGapPercent { get; }
+
+    public double StopDistanceAtr { get; }
+
+    public double TargetDistanceAtr { get; }
+
+    public double RiskRewardRatio { get; }
+
     public int HoldingDays { get; set; }
 
     public double LastMarkPrice { get; set; }
+
+    public double LowestObservedPrice { get; set; }
+
+    public double HighestObservedPrice { get; set; }
 }
 
 public sealed record PortfolioExitDecision(
@@ -2279,8 +2958,33 @@ public sealed record PortfolioTrade(
     double Pnl,
     double ReturnPercent,
     double RMultiple,
-    string ExitReason
-);
+    string ExitReason,
+    double InitialRiskPerShare,
+    int OpportunityScore,
+    int RiskScore,
+    int NetScore,
+    double Momentum,
+    double Volatility,
+    double AtrPercent,
+    double DistanceFromSma20Percent,
+    double DistanceFromSma50Percent,
+    double EntryGapPercent,
+    double StopDistanceAtr,
+    double TargetDistanceAtr,
+    double RiskRewardRatio,
+    double MaeR,
+    double MfeR,
+    double MaePercent,
+    double MfePercent)
+{
+    public double? PostExitBestR5 { get; init; }
+
+    public double? PostExitBestR10 { get; init; }
+
+    public bool? RecoveredEntryWithin5Bars { get; init; }
+
+    public bool? RecoveredEntryWithin10Bars { get; init; }
+}
 
 public sealed record PortfolioEquityPoint(
     DateTime Date,
@@ -2309,3 +3013,35 @@ public sealed record PortfolioBacktestRunResult(
     PortfolioSimulationResult OutOfSample,
     PortfolioSimulationResult Overall
 );
+
+public sealed record StrategyExperimentConfig(
+    string Name,
+    int MinOpportunityScore = 75,
+    int MaxRiskScore = 35,
+    double MinRiskReward = 1.80,
+    double? MaxRiskReward = null,
+    double? MinEntryGapPercent = null,
+    double? MaxEntryGapPercent = null,
+    double? MinStopDistanceAtr = null,
+    double? MaxStopDistanceAtr = null)
+{
+    public static StrategyExperimentConfig Baseline =>
+        new(
+            "BASELINE"
+        );
+}
+
+public sealed record StrategyExperimentResult(
+    StrategyExperimentConfig Configuration,
+    PortfolioSimulationResult Simulation,
+    int Trades,
+    int WinningTrades,
+    int LosingTrades,
+    double WinRate,
+    double ProfitFactor,
+    double AverageR,
+    double NetPnl,
+    double ReturnPercent,
+    double MaxDrawdownPercent
+);
+
