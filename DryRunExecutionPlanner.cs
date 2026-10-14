@@ -1,19 +1,31 @@
 internal sealed class DryRunExecutionPlanner
 {
-    private const double StrategyCapital =
-        20.00;
+    private readonly FrozenForwardPolicy
+        _policy;
 
-    private const double RiskPerTradePercent =
-        0.50;
+    private readonly MarketRegimeSnapshot?
+        _currentRegime;
 
-    private const double MaxPositionPercent =
-        25.00;
+    // Kept temporarily so Program.cs continues to compile
+    // until V9C is wired into it in the next step.
+    public DryRunExecutionPlanner()
+        : this(
+            FrozenForwardPolicy.V9C,
+            null
+        )
+    {
+    }
 
-    private const double MinimumRiskRewardRatio =
-        1.80;
+    public DryRunExecutionPlanner(
+        FrozenForwardPolicy policy,
+        MarketRegimeSnapshot? currentRegime)
+    {
+        _policy =
+            policy;
 
-    private const int MaximumPlannedPositions =
-        3;
+        _currentRegime =
+            currentRegime;
+    }
 
     public DryRunExecutionPlan BuildAndPrint(
         PaperTradingPreflightResult preflight,
@@ -26,11 +38,11 @@ internal sealed class DryRunExecutionPlanner
         );
 
         Console.WriteLine(
-            " PAPER TRADING ENGINE V9B"
+            " PAPER TRADING ENGINE V9C"
         );
 
         Console.WriteLine(
-            " DRY-RUN EXECUTION PLANNER"
+            " FROZEN-POLICY DRY-RUN PLANNER"
         );
 
         Console.WriteLine(
@@ -38,24 +50,72 @@ internal sealed class DryRunExecutionPlanner
         );
 
         Console.WriteLine(
-            $"Strategy Capital: ${StrategyCapital:F2}"
+            $"Policy Version: {_policy.PolicyVersion}"
         );
 
         Console.WriteLine(
-            $"Risk Per Trade: {RiskPerTradePercent:F2}%"
+            $"Strategy: {_policy.StrategyName}"
         );
 
         Console.WriteLine(
-            $"Max Position: {MaxPositionPercent:F2}%"
+            $"Regime Gate: {_policy.RegimeGate}"
         );
 
         Console.WriteLine(
-            $"Max Planned Positions: {MaximumPlannedPositions}"
+            $"Strategy Capital: " +
+            $"${_policy.StrategyCapital:F2}"
         );
 
         Console.WriteLine(
-            $"Minimum Risk/Reward: 1:{MinimumRiskRewardRatio:F2}"
+            $"Risk Per Trade: " +
+            $"{_policy.RiskPerTradePercent:F2}%"
         );
+
+        Console.WriteLine(
+            $"Max Position: " +
+            $"{_policy.MaxPositionPercent:F2}%"
+        );
+
+        Console.WriteLine(
+            $"Max Planned Positions: " +
+            $"{_policy.MaxOpenPositions}"
+        );
+
+        Console.WriteLine(
+            $"Minimum Risk/Reward: " +
+            $"1:{_policy.MinimumRiskRewardRatio:F2}"
+        );
+
+        Console.WriteLine();
+
+        if (_currentRegime is null)
+        {
+            Console.WriteLine(
+                "Current Regime: UNAVAILABLE"
+            );
+        }
+        else
+        {
+            Console.WriteLine(
+                $"Regime Source Date: " +
+                $"{_currentRegime.Date:yyyy-MM-dd}"
+            );
+
+            Console.WriteLine(
+                $"Trend Regime: " +
+                $"{_currentRegime.TrendRegime}"
+            );
+
+            Console.WriteLine(
+                $"Volatility Regime: " +
+                $"{_currentRegime.VolatilityRegime}"
+            );
+
+            Console.WriteLine(
+                $"SPY Close: " +
+                $"${_currentRegime.Close:F2}"
+            );
+        }
 
         Console.WriteLine();
 
@@ -70,14 +130,19 @@ internal sealed class DryRunExecutionPlanner
         );
 
         Console.WriteLine(
-            $"Real Order Submission Enabled: " +
-            $"{preflight.OrderSubmissionEnabled}"
+            $"Paper Order Submission Enabled: " +
+            $"{_policy.PaperOrderSubmissionEnabled}"
+        );
+
+        Console.WriteLine(
+            $"Live Trading Enabled: " +
+            $"{_policy.LiveTradingEnabled}"
         );
 
         Console.WriteLine();
 
         Console.WriteLine(
-            "IMPORTANT: V9B IS PLANNING ONLY."
+            "IMPORTANT: V9C IS STILL DRY-RUN ONLY."
         );
 
         Console.WriteLine(
@@ -120,6 +185,11 @@ internal sealed class DryRunExecutionPlanner
                     totalPlannedPositionValue
                 );
 
+            var stopDistanceAtr =
+                CalculateStopDistanceAtr(
+                    candidate
+                );
+
             Console.WriteLine();
 
             Console.WriteLine(
@@ -131,49 +201,86 @@ internal sealed class DryRunExecutionPlanner
             );
 
             Console.WriteLine(
-                "STRATEGY: CURRENT_ANALYSIS_RULESET_V1"
+                $"POLICY: {_policy.PolicyVersion}"
             );
 
             Console.WriteLine(
-                "REGIME: OBSERVE_ONLY_IN_V9B"
+                $"STRATEGY: {_policy.StrategyName}"
+            );
+
+            Console.WriteLine(
+                $"REGIME GATE: {_policy.RegimeGate}"
+            );
+
+            if (_currentRegime is not null)
+            {
+                Console.WriteLine(
+                    $"CURRENT REGIME: " +
+                    $"{_currentRegime.TrendRegime} | " +
+                    $"{_currentRegime.VolatilityRegime}"
+                );
+            }
+            else
+            {
+                Console.WriteLine(
+                    "CURRENT REGIME: UNAVAILABLE"
+                );
+            }
+
+            Console.WriteLine();
+
+            Console.WriteLine(
+                $"Entry:        " +
+                $"${candidate.EntryPrice:F2}"
+            );
+
+            Console.WriteLine(
+                $"ATR(14):      " +
+                $"${candidate.Atr:F2}"
+            );
+
+            Console.WriteLine(
+                $"Stop Loss:    " +
+                $"${candidate.StopLoss:F2}"
+            );
+
+            Console.WriteLine(
+                $"Stop Distance:" +
+                $" {FormatStopDistance(stopDistanceAtr)} ATR"
+            );
+
+            Console.WriteLine(
+                $"Take Profit:  " +
+                $"${candidate.TakeProfit:F2}"
             );
 
             Console.WriteLine();
 
             Console.WriteLine(
-                $"Entry:        ${candidate.EntryPrice:F2}"
+                $"Quantity:     " +
+                $"{candidate.Quantity:F4} shares"
             );
 
             Console.WriteLine(
-                $"Stop Loss:    ${candidate.StopLoss:F2}"
+                $"Position $:   " +
+                $"${candidate.PositionValue:F2}"
             );
 
             Console.WriteLine(
-                $"Take Profit:  ${candidate.TakeProfit:F2}"
-            );
-
-            Console.WriteLine();
-
-            Console.WriteLine(
-                $"Quantity:     {candidate.Quantity:F4} shares"
+                $"Max Risk:     " +
+                $"${candidate.ExpectedMaximumLoss:F2}"
             );
 
             Console.WriteLine(
-                $"Position $:   ${candidate.PositionValue:F2}"
-            );
-
-            Console.WriteLine(
-                $"Max Risk:     ${candidate.ExpectedMaximumLoss:F2}"
-            );
-
-            Console.WriteLine(
-                $"Risk/Reward:  1:{candidate.RiskRewardRatio:F2}"
+                $"Risk/Reward:  " +
+                $"1:{candidate.RiskRewardRatio:F2}"
             );
 
             Console.WriteLine();
 
             Console.WriteLine(
-                $"DRY-RUN DECISION: {decision.Decision}"
+                $"DRY-RUN DECISION: " +
+                $"{decision.Decision}"
             );
 
             Console.WriteLine(
@@ -185,8 +292,17 @@ internal sealed class DryRunExecutionPlanner
                 plannedOrders.Add(
                     new DryRunPlannedOrder(
                         candidate.Symbol,
+                        _policy.PolicyVersion,
+                        _policy.StrategyName,
+                        _policy.RegimeGate.ToString(),
+                        _currentRegime?.TrendRegime ??
+                        "UNAVAILABLE",
+                        _currentRegime?.VolatilityRegime ??
+                        "UNAVAILABLE",
                         candidate.EntryPrice,
+                        candidate.Atr,
                         candidate.StopLoss,
+                        stopDistanceAtr,
                         candidate.TakeProfit,
                         candidate.Quantity,
                         candidate.PositionValue,
@@ -212,7 +328,7 @@ internal sealed class DryRunExecutionPlanner
         );
 
         Console.WriteLine(
-            " V9B DRY-RUN SUMMARY"
+            " V9C FROZEN-POLICY DRY-RUN SUMMARY"
         );
 
         Console.WriteLine(
@@ -220,7 +336,8 @@ internal sealed class DryRunExecutionPlanner
         );
 
         Console.WriteLine(
-            $"Candidates Evaluated: {orderedCandidates.Count}"
+            $"Candidates Evaluated: " +
+            $"{orderedCandidates.Count}"
         );
 
         Console.WriteLine(
@@ -239,13 +356,16 @@ internal sealed class DryRunExecutionPlanner
             $"${totalPlannedPositionValue:F2}"
         );
 
+        var capitalUsagePercent =
+            _policy.StrategyCapital > 0
+                ? totalPlannedPositionValue /
+                  _policy.StrategyCapital *
+                  100.0
+                : 0;
+
         Console.WriteLine(
             $"Planned Capital Usage: " +
-            $"{(
-                totalPlannedPositionValue /
-                StrategyCapital *
-                100.0
-            ):F2}%"
+            $"{capitalUsagePercent:F2}%"
         );
 
         Console.WriteLine(
@@ -273,7 +393,11 @@ internal sealed class DryRunExecutionPlanner
         Console.WriteLine();
 
         Console.WriteLine(
-            "REAL ORDER SUBMISSION REMAINS DISABLED."
+            "REAL PAPER ORDER SUBMISSION REMAINS DISABLED."
+        );
+
+        Console.WriteLine(
+            "LIVE TRADING REMAINS DISABLED."
         );
 
         Console.WriteLine(
@@ -287,11 +411,14 @@ internal sealed class DryRunExecutionPlanner
             totalExpectedMaximumLoss,
             preflight.MarketOpen,
             preflight.SafetyChecksPassed,
-            preflight.OrderSubmissionEnabled
+            _policy.PaperOrderSubmissionEnabled,
+            _policy.PolicyVersion,
+            _currentRegime?.TrendRegime,
+            _currentRegime?.VolatilityRegime
         );
     }
 
-    private static DryRunDecision EvaluateCandidate(
+    private DryRunDecision EvaluateCandidate(
         PaperTradingPreflightResult preflight,
         TradeCandidate candidate,
         int alreadyPlannedPositions,
@@ -301,6 +428,26 @@ internal sealed class DryRunExecutionPlanner
         {
             return Reject(
                 "Paper account preflight safety checks did not pass."
+            );
+        }
+
+        if (_currentRegime is null)
+        {
+            return Reject(
+                "Current completed-bar market regime is unavailable."
+            );
+        }
+
+        if (!_policy.AllowsRegime(
+                _currentRegime.TrendRegime,
+                _currentRegime.VolatilityRegime
+            ))
+        {
+            return Reject(
+                $"Frozen regime gate {_policy.RegimeGate} " +
+                $"does not allow current regime " +
+                $"{_currentRegime.TrendRegime} | " +
+                $"{_currentRegime.VolatilityRegime}."
             );
         }
 
@@ -319,12 +466,39 @@ internal sealed class DryRunExecutionPlanner
             );
         }
 
+        if (candidate.Atr <= 0)
+        {
+            return Reject(
+                "ATR is unavailable or invalid."
+            );
+        }
+
         if (candidate.StopLoss <= 0 ||
             candidate.StopLoss >=
             candidate.EntryPrice)
         {
             return Reject(
                 "Stop-loss geometry is invalid."
+            );
+        }
+
+        if (!_policy.AllowsStopDistance(
+                candidate.Atr,
+                candidate.EntryPrice,
+                candidate.StopLoss
+            ))
+        {
+            var stopDistanceAtr =
+                CalculateStopDistanceAtr(
+                    candidate
+                );
+
+            return Reject(
+                $"Stop distance " +
+                $"{FormatStopDistance(stopDistanceAtr)} ATR " +
+                $"is outside frozen strategy range " +
+                $"{_policy.MinimumStopDistanceAtr:F2}-" +
+                $"{_policy.MaximumStopDistanceAtr:F2} ATR."
             );
         }
 
@@ -351,19 +525,20 @@ internal sealed class DryRunExecutionPlanner
         }
 
         if (candidate.RiskRewardRatio <
-            MinimumRiskRewardRatio)
+            _policy.MinimumRiskRewardRatio)
         {
             return Reject(
                 $"Risk/reward ratio " +
                 $"{candidate.RiskRewardRatio:F2} " +
-                $"is below {MinimumRiskRewardRatio:F2}."
+                $"is below " +
+                $"{_policy.MinimumRiskRewardRatio:F2}."
             );
         }
 
         var maximumRiskDollars =
-            StrategyCapital *
+            _policy.StrategyCapital *
             (
-                RiskPerTradePercent /
+                _policy.RiskPerTradePercent /
                 100.0
             );
 
@@ -374,15 +549,15 @@ internal sealed class DryRunExecutionPlanner
             return Reject(
                 $"Expected max loss " +
                 $"${candidate.ExpectedMaximumLoss:F4} " +
-                $"exceeds the per-trade cap " +
+                $"exceeds the frozen per-trade cap " +
                 $"${maximumRiskDollars:F4}."
             );
         }
 
         var maximumPositionDollars =
-            StrategyCapital *
+            _policy.StrategyCapital *
             (
-                MaxPositionPercent /
+                _policy.MaxPositionPercent /
                 100.0
             );
 
@@ -393,28 +568,28 @@ internal sealed class DryRunExecutionPlanner
             return Reject(
                 $"Position value " +
                 $"${candidate.PositionValue:F2} " +
-                $"exceeds the per-position cap " +
+                $"exceeds the frozen per-position cap " +
                 $"${maximumPositionDollars:F2}."
             );
         }
 
         if (alreadyPlannedPositions >=
-            MaximumPlannedPositions)
+            _policy.MaxOpenPositions)
         {
             return Reject(
-                $"Maximum planned positions " +
-                $"({MaximumPlannedPositions}) already reached."
+                $"Frozen maximum planned positions " +
+                $"({_policy.MaxOpenPositions}) already reached."
             );
         }
 
         if (alreadyPlannedPositionValue +
             candidate.PositionValue >
-            StrategyCapital +
+            _policy.StrategyCapital +
             0.000001)
         {
             return Reject(
                 "Combined planned position value would exceed " +
-                "the strategy capital cap."
+                "the frozen strategy capital cap."
             );
         }
 
@@ -422,10 +597,40 @@ internal sealed class DryRunExecutionPlanner
             true,
             "WOULD SUBMIT",
             preflight.MarketOpen
-                ? "Passed V9B dry-run execution checks."
-                : "Passed V9B checks; market is closed, so this is " +
-                  "a future-paper-execution plan only."
+                ? "Passed frozen-policy V9C dry-run checks."
+                : "Passed frozen-policy V9C checks; market is closed, " +
+                  "so this is a future-paper-execution plan only."
         );
+    }
+
+    private static double CalculateStopDistanceAtr(
+        TradeCandidate candidate)
+    {
+        if (candidate.Atr <= 0 ||
+            candidate.EntryPrice <= 0 ||
+            candidate.StopLoss <= 0)
+        {
+            return double.NaN;
+        }
+
+        return
+            (
+                candidate.EntryPrice -
+                candidate.StopLoss
+            ) /
+            candidate.Atr;
+    }
+
+    private static string FormatStopDistance(
+        double value)
+    {
+        return
+            double.IsNaN(value) ||
+            double.IsInfinity(value)
+                ? "N/A"
+                : value.ToString(
+                    "F2"
+                );
     }
 
     private static DryRunDecision Reject(
@@ -447,8 +652,15 @@ internal sealed record DryRunDecision(
 
 internal sealed record DryRunPlannedOrder(
     string Symbol,
+    string PolicyVersion,
+    string StrategyName,
+    string RegimeGate,
+    string TrendRegime,
+    string VolatilityRegime,
     double EntryPrice,
+    double Atr,
     double StopLoss,
+    double StopDistanceAtr,
     double TakeProfit,
     double Quantity,
     double PositionValue,
@@ -465,5 +677,8 @@ internal sealed record DryRunExecutionPlan(
     double TotalExpectedMaximumLoss,
     bool MarketOpen,
     bool SafetyChecksPassed,
-    bool RealOrderSubmissionEnabled
+    bool PaperOrderSubmissionEnabled,
+    string PolicyVersion,
+    string? TrendRegime,
+    string? VolatilityRegime
 );

@@ -726,11 +726,23 @@ try
 
 
 
-    await marketRegimeValidationEngine.RunAsync(    
+    var marketRegimeStudy =
+        await marketRegimeValidationEngine.RunAsync(
+            symbols
+        );
 
-        symbols
-
-    );
+    var currentRegime =
+        marketRegimeStudy.BenchmarkRegimes
+            .Where(
+                snapshot =>
+                    snapshot.Date <
+                    DateTime.UtcNow.Date
+            )
+        .OrderByDescending(
+            snapshot =>
+                snapshot.Date
+        )
+        .FirstOrDefault();
 
 
 
@@ -765,13 +777,53 @@ try
     var preflightResult =
         await paperTradingEngine.RunPreflightAsync();
 
-    var dryRunExecutionPlanner =
-        new DryRunExecutionPlanner();
+    var frozenForwardPolicy =
+        FrozenForwardPolicy.V9C;
 
-    dryRunExecutionPlanner.BuildAndPrint(
-        preflightResult,
-        tradeCandidates
-    );
+    frozenForwardPolicy.Print();
+
+    var forwardSignalEngine =
+        new ForwardSignalEngine(
+            dataClient
+        );
+
+    var forwardSignalStudy =
+        await forwardSignalEngine.RunAsync(
+            symbols,
+            preflightResult,
+            frozenForwardPolicy
+        );
+
+    var forwardSignalStore =
+        new ForwardSignalStore();
+
+    if (!preflightResult.MarketOpen)
+    {
+        await forwardSignalStore.SaveAsync(
+            forwardSignalStudy
+        );
+    }
+    else
+    {
+        var storedForwardSignals =
+            await forwardSignalStore.LoadAsync();
+
+        forwardSignalStore.PrintLoadSummary(
+            storedForwardSignals
+        );
+    }    
+
+    var forwardExecutionEngine =
+        new ForwardExecutionEngine(
+            dataClient,
+            forwardSignalStore
+        );
+
+    var forwardExecutionPlan =
+        await forwardExecutionEngine.RunAsync(
+            preflightResult,
+            frozenForwardPolicy
+        );
 
 
 
