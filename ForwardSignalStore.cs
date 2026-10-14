@@ -100,6 +100,44 @@ public sealed class ForwardSignalStore
 
                 : (DateTime?)null;
 
+        if (File.Exists(
+                _storePath
+            ))
+        {
+            var existingSnapshot =
+                await LoadAsync(
+                    cancellationToken
+                );
+
+            if (existingSnapshot is not null &&
+                string.Equals(
+                    existingSnapshot.PolicyVersion,
+                    study.PolicyVersion,
+                    StringComparison.Ordinal
+                ) &&
+                existingSnapshot
+                    .PlannedExecutionOpenUtc
+                    .HasValue &&
+                plannedExecutionOpenUtc
+                    .HasValue &&
+                EnsureUtc(
+                    existingSnapshot
+                        .PlannedExecutionOpenUtc
+                        .Value
+                ) ==
+                EnsureUtc(
+                    plannedExecutionOpenUtc
+                        .Value
+                ))
+            {
+                PrintImmutableFreezeSummary(
+                    existingSnapshot
+                );
+
+                return existingSnapshot;
+            }
+        }        
+
         var snapshot =
             new ForwardSignalStoreSnapshot(
                 SchemaVersion:
@@ -378,6 +416,73 @@ public sealed class ForwardSignalStore
             );
         }
     }
+    
+    private void PrintImmutableFreezeSummary(
+    ForwardSignalStoreSnapshot snapshot)
+{
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    Console.WriteLine(
+        " FORWARD SIGNAL STORE V9E.1"
+    );
+
+    Console.WriteLine(
+        " IMMUTABLE SESSION FREEZE"
+    );
+
+    Console.WriteLine(
+        "=============================================="
+    );
+
+    Console.WriteLine(
+        $"Store Path: {_storePath}"
+    );
+
+    Console.WriteLine(
+        $"Policy Version: " +
+        $"{snapshot.PolicyVersion}"
+    );
+
+    Console.WriteLine(
+        $"Signal Date: " +
+        $"{FormatDate(snapshot.SignalDate)}"
+    );
+
+    Console.WriteLine(
+        $"Planned Execution Open UTC: " +
+        $"{FormatDateTime(snapshot.PlannedExecutionOpenUtc)}"
+    );
+
+    Console.WriteLine(
+        $"Frozen Pending Signals: " +
+        $"{snapshot.PendingSignals.Count}"
+    );
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "SESSION ALREADY FROZEN."
+    );
+
+    Console.WriteLine(
+        "Existing snapshot was preserved."
+    );
+
+    Console.WriteLine(
+        "Newly generated signals were NOT allowed " +
+        "to overwrite this execution session."
+    );
+
+    Console.WriteLine();
+
+    Console.WriteLine(
+        "NO ORDERS WERE SUBMITTED."
+    );
+}
 
     private void PrintSavedSummary(
         ForwardSignalStoreSnapshot snapshot)
