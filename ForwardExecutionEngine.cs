@@ -41,7 +41,7 @@ public sealed class ForwardExecutionEngine
         );
 
         Console.WriteLine(
-            " FORWARD EXECUTION ENGINE V9F"
+            " FORWARD EXECUTION ENGINE V9F.1"
         );
 
         Console.WriteLine(
@@ -332,7 +332,7 @@ public sealed class ForwardExecutionEngine
         );
 
         Console.WriteLine(
-            " V9F FORWARD EXECUTION SUMMARY"
+            " V9F.1 FORWARD EXECUTION SUMMARY"
         );
 
         Console.WriteLine(
@@ -549,6 +549,16 @@ public sealed class ForwardExecutionEngine
                 policy
             );
 
+        var stopDistanceAtr =
+            signal.Atr > 0 &&
+            candidate.StopLoss > 0
+                ? (
+                    executionPrice -
+                    candidate.StopLoss
+                  ) /
+                  signal.Atr
+                : 0;
+
         if (!candidate.IsValid)
         {
             return Reject(
@@ -556,18 +566,11 @@ public sealed class ForwardExecutionEngine
                 candidate.RejectionReason,
                 rawOpen,
                 executionPrice,
-                openingBar.TimeUtc
+                openingBar.TimeUtc,
+                candidate,
+                stopDistanceAtr
             );
         }
-
-        var stopDistanceAtr =
-            signal.Atr > 0
-                ? (
-                    executionPrice -
-                    candidate.StopLoss
-                  ) /
-                  signal.Atr
-                : 0;
 
         if (!policy.AllowsStopDistance(
                 signal.Atr,
@@ -583,7 +586,8 @@ public sealed class ForwardExecutionEngine
                 rawOpen,
                 executionPrice,
                 openingBar.TimeUtc,
-                candidate
+                candidate,
+                stopDistanceAtr
             );
         }
 
@@ -664,7 +668,8 @@ public sealed class ForwardExecutionEngine
                 executionPrice,
                 openingBar.TimeUtc,
                 candidate,
-                stopDistanceAtr
+                stopDistanceAtr,
+                quantity: quantity
             );
         }
 
@@ -691,7 +696,11 @@ public sealed class ForwardExecutionEngine
                 executionPrice,
                 openingBar.TimeUtc,
                 candidate,
-                stopDistanceAtr
+                stopDistanceAtr,
+                quantity: quantity,
+                positionValue: positionValue,
+                entryFee: entryFee,
+                totalEntryCost: totalEntryCost
             );
         }
 
@@ -710,7 +719,12 @@ public sealed class ForwardExecutionEngine
                 executionPrice,
                 openingBar.TimeUtc,
                 candidate,
-                stopDistanceAtr
+                stopDistanceAtr,
+                quantity: quantity,
+                positionValue: positionValue,
+                entryFee: entryFee,
+                totalEntryCost: totalEntryCost,
+                expectedMaximumLoss: expectedMaximumLoss
             );
         }
 
@@ -909,7 +923,8 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "No valid stop-loss level could be calculated."
+                    "No valid stop-loss level could be calculated.",
+                    stopLoss: stopLoss
                 );
         }
 
@@ -925,7 +940,9 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "Calculated target is not above execution price."
+                    "Calculated target is not above execution price.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit
                 );
         }
 
@@ -942,7 +959,11 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "Risk/reward geometry is invalid."
+                    "Risk/reward geometry is invalid.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    riskPerShare: riskPerShare,
+                    rewardPerShare: rewardPerShare
                 );
         }
 
@@ -955,7 +976,12 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "Frozen signal trend is not bullish."
+                    "Frozen signal trend is not bullish.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    riskPerShare: riskPerShare,
+                    rewardPerShare: rewardPerShare,
+                    riskRewardRatio: riskRewardRatio
                 );
         }
 
@@ -963,7 +989,12 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "Frozen signal momentum is not positive."
+                    "Frozen signal momentum is not positive.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    riskPerShare: riskPerShare,
+                    rewardPerShare: rewardPerShare,
+                    riskRewardRatio: riskRewardRatio
                 );
         }
 
@@ -971,7 +1002,12 @@ public sealed class ForwardExecutionEngine
         {
             return
                 ForwardExecutionCandidate.Invalid(
-                    "Frozen signal risk score exceeds 35."
+                    "Frozen signal risk score exceeds 35.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    riskPerShare: riskPerShare,
+                    rewardPerShare: rewardPerShare,
+                    riskRewardRatio: riskRewardRatio
                 );
         }
 
@@ -981,7 +1017,12 @@ public sealed class ForwardExecutionEngine
             return
                 ForwardExecutionCandidate.Invalid(
                     $"Risk/reward ratio {riskRewardRatio:F2} is below " +
-                    $"{policy.MinimumRiskRewardRatio:F2}."
+                    $"{policy.MinimumRiskRewardRatio:F2}.",
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    riskPerShare: riskPerShare,
+                    rewardPerShare: rewardPerShare,
+                    riskRewardRatio: riskRewardRatio
                 );
         }
 
@@ -1124,7 +1165,13 @@ public sealed class ForwardExecutionEngine
         double executionPrice = 0,
         DateTime? executionBarTimeUtc = null,
         ForwardExecutionCandidate? candidate = null,
-        double stopDistanceAtr = 0)
+        double stopDistanceAtr = 0,
+        double quantity = 0,
+        double positionValue = 0,
+        double entryFee = 0,
+        double slippageCost = 0,
+        double totalEntryCost = 0,
+        double expectedMaximumLoss = 0)
     {
         return new ForwardExecutionDecision(
             Symbol:
@@ -1189,22 +1236,22 @@ public sealed class ForwardExecutionEngine
                 0,
 
             Quantity:
-                0,
+                quantity,
 
             PositionValue:
-                0,
+                positionValue,
 
             EntryFee:
-                0,
+                entryFee,
 
             SlippageCost:
-                0,
+                slippageCost,
 
             TotalEntryCost:
-                0,
+                totalEntryCost,
 
             ExpectedMaximumLoss:
-                0,
+                expectedMaximumLoss,
 
             NetScore:
                 signal.NetScore
@@ -1316,15 +1363,20 @@ public sealed record ForwardExecutionCandidate(
     string RejectionReason)
 {
     public static ForwardExecutionCandidate Invalid(
-        string reason)
+        string reason,
+        double stopLoss = 0,
+        double takeProfit = 0,
+        double riskPerShare = 0,
+        double rewardPerShare = 0,
+        double riskRewardRatio = 0)
     {
         return new ForwardExecutionCandidate(
             false,
-            0,
-            0,
-            0,
-            0,
-            0,
+            stopLoss,
+            takeProfit,
+            riskPerShare,
+            rewardPerShare,
+            riskRewardRatio,
             reason
         );
     }
